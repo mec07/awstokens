@@ -50,6 +50,9 @@ type Auth struct {
 
 // NewAuth returns a pointer to an Auth using the provided Config.
 func NewAuth(config Config) (*Auth, error) {
+	// Put in fake creds because we need to provide some creds or else
+	// NewSession will return an error. We don't need valid creds to refresh
+	// tokens.
 	creds := credentials.NewStaticCredentials("access_id", "access_secret_key", "")
 	sess, err := session.NewSession(&aws.Config{
 		Region:      aws.String(config.Region),
