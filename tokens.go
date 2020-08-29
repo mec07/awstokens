@@ -1,10 +1,10 @@
 package awstokens
 
 import (
-	"fmt"
 	"sync"
 	"time"
 
+	"github.com/aws/aws-sdk-go/aws"
 	"github.com/aws/aws-sdk-go/aws/credentials"
 	"github.com/aws/aws-sdk-go/aws/session"
 	"github.com/aws/aws-sdk-go/service/cognitoidentityprovider"
@@ -13,6 +13,12 @@ import (
 )
 
 const defaultExpiryMargin time.Duration = 5 * time.Second
+
+// AuthInitiator is an interface that represents the cognitoidentityprovider
+// library client, which allows you to refresh tokens.
+type AuthInitiator interface {
+	InitiateAuth(input *cognitoidentityprovider.InitiateAuthInput) (*cognitoidentityprovider.InitiateAuthOutput, error)
+}
 
 // Config contains the initial settings for the Auth.
 type Config struct {
@@ -31,31 +37,48 @@ type Config struct {
 
 // Auth contains the AWS tokens and some extra info for refreshing them.
 type Auth struct {
-	mu sync.RWMutex
+	mu            sync.RWMutex
+	authInitiator AuthInitiator
 	// Actual tokens
 	accessToken, idToken, refreshToken string
 	// Info required to refresh the tokens
 	clientID, region string
 	// Extra settings
-	shouldUseIDToken bool
-	expiryMargin     time.Duration
+	useIDToken   bool
+	expiryMargin time.Duration
 }
 
 // NewAuth returns a pointer to an Auth using the provided Config.
-func NewAuth(config Config) *Auth {
+func NewAuth(config Config) (*Auth, error) {
+	creds := credentials.NewStaticCredentials("access_id", "access_secret_key", "")
+	sess, err := session.NewSession(&aws.Config{
+		Region:      aws.String(config.Region),
+		Credentials: creds,
+	})
+	if err != nil {
+		return nil, errors.Wrap(err, "session.NewSession")
+	}
+	cognitoIDP := cognitoidentityprovider.New(sess)
+
+	return NewAuthWithAuthInitiator(cognitoIDP, config), nil
+}
+
+// NewAuthWithAuthInitiator returns a pointer to an Auth using the provided config and AuthInitiator.
+func NewAuthWithAuthInitiator(authInitiator AuthInitiator, config Config) *Auth {
 	expiryMargin := defaultExpiryMargin
 	if config.ExpiryMargin > 0 {
 		expiryMargin = config.ExpiryMargin
 	}
 
 	return &Auth{
-		accessToken:      config.AccessToken,
-		idToken:          config.IDToken,
-		refreshToken:     config.RefreshToken,
-		clientID:         config.ClientID,
-		region:           config.Region,
-		shouldUseIDToken: config.ShouldUseIDToken,
-		expiryMargin:     expiryMargin,
+		authInitiator: authInitiator,
+		accessToken:   config.AccessToken,
+		idToken:       config.IDToken,
+		refreshToken:  config.RefreshToken,
+		clientID:      config.ClientID,
+		region:        config.Region,
+		useIDToken:    config.ShouldUseIDToken,
+		expiryMargin:  expiryMargin,
 	}
 }
 
@@ -99,35 +122,35 @@ func (t *Auth) shouldUseIDToken() bool {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	return t.ShouldUseIDToken
+	return t.useIDToken
 }
 
 func (t *Auth) getExpiryMargin() time.Duration {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	return t.ExpiryMargin
+	return t.expiryMargin
 }
 
 func (t *Auth) getRegion() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	return r.region
+	return t.region
 }
 
 func (t *Auth) getRefreshToken() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	return r.refreshToken
+	return t.refreshToken
 }
 
 func (t *Auth) getClientID() string {
 	t.mu.RLock()
 	defer t.mu.RUnlock()
 
-	return r.clientID
+	return t.clientID
 }
 
 func (t *Auth) setIDToken(token string) {
@@ -145,15 +168,7 @@ func (t *Auth) setAccessToken(token string) {
 }
 
 func (t *Auth) refreshTokens() error {
-	creds := credentials.NewStaticCredentials("access_id", "access_secret_key", "")
-	sess := session.NewSession(&aws.Config{
-		Region:      aws.String(t.getRegion()),
-		Credentials: creds,
-	})
-	sess := aws.Session()
-	cognitoIDP := cognitoidentityprovider.New(sess)
-
-	res, err := cognitoIDP.InitiateAuth(&cognitoidentityprovider.InitiateAuthInput{
+	res, err := t.authInitiator.InitiateAuth(&cognitoidentityprovider.InitiateAuthInput{
 		AuthFlow: aws.String(cognitoidentityprovider.AuthFlowTypeRefreshTokenAuth),
 		AuthParameters: map[string]*string{
 			cognitoidentityprovider.AuthFlowTypeRefreshToken: aws.String(t.getRefreshToken()),
@@ -161,8 +176,9 @@ func (t *Auth) refreshTokens() error {
 		ClientId: aws.String(t.getClientID()),
 	})
 	if err != nil {
-		return fmt.Errorf("cognitoidentityprovider.New.InitiateAuth: %w", err)
+		return errors.Wrap(err, "cognitoidentityprovider.New.InitiateAuth")
 	}
+
 	if res.AuthenticationResult == nil {
 		return errors.New("cognitoidentityprovider.New.InitiateAuth response has no AuthenticationResult")
 	}
@@ -174,12 +190,15 @@ func (t *Auth) refreshTokens() error {
 	}
 	t.setAccessToken(*res.AuthenticationResult.AccessToken)
 	t.setIDToken(*res.AuthenticationResult.IdToken)
+
+	return nil
 }
 
 // tokenIsExpired checks if the provided token has expired, or is shortly due
 // to expire.
 func tokenIsExpired(token string, expiryMargin time.Duration) bool {
-	return time.Now().UTC().Unix() > (getTokenExpiryTime(token) - expiryMargin)
+	adjustedExpiryTime := getTokenExpiryTime(token) - int64(expiryMargin/time.Second)
+	return time.Now().UTC().Unix() > adjustedExpiryTime
 }
 
 func getTokenExpiryTime(token string) int64 {
