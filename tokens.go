@@ -42,7 +42,7 @@ type Auth struct {
 	// Actual tokens
 	accessToken, idToken, refreshToken string
 	// Info required to refresh the tokens
-	clientID, region string
+	clientID string
 	// Extra settings
 	useIDToken   bool
 	expiryMargin time.Duration
@@ -76,7 +76,6 @@ func NewAuthWithAuthInitiator(authInitiator AuthInitiator, config Config) *Auth 
 		idToken:       config.IDToken,
 		refreshToken:  config.RefreshToken,
 		clientID:      config.ClientID,
-		region:        config.Region,
 		useIDToken:    config.ShouldUseIDToken,
 		expiryMargin:  expiryMargin,
 	}
@@ -130,13 +129,6 @@ func (t *Auth) getExpiryMargin() time.Duration {
 	defer t.mu.RUnlock()
 
 	return t.expiryMargin
-}
-
-func (t *Auth) getRegion() string {
-	t.mu.RLock()
-	defer t.mu.RUnlock()
-
-	return t.region
 }
 
 func (t *Auth) getRefreshToken() string {
@@ -204,6 +196,6 @@ func tokenIsExpired(token string, expiryMargin time.Duration) bool {
 func getTokenExpiryTime(token string) int64 {
 	// Parse the token without validating it.
 	claims := jwt.StandardClaims{}
-	jwt.ParseWithClaims(token, &claims, nil)
+	_, _ = jwt.ParseWithClaims(token, &claims, nil)
 	return claims.ExpiresAt
 }

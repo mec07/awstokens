@@ -59,7 +59,6 @@ func TestAuth(t *testing.T) {
 	if err != nil {
 		t.Fatalf("jwt.Token.SigningMethodHS256: %v", err)
 	}
-	_ = expiredToken
 
 	table := []struct {
 		name              string
@@ -118,7 +117,7 @@ func TestAuth(t *testing.T) {
 				AccessToken:      test.accessToken,
 				RefreshToken:     test.refreshToken,
 				ClientID:         "1234",
-				Region:           "eu-west-2",
+				Region:           "us-west-1",
 				ShouldUseIDToken: test.shouldUseIDToken,
 			}
 			authInitiator := &mockAuthInitiator{shouldError: test.shouldError}
