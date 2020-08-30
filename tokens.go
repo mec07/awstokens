@@ -88,7 +88,7 @@ func NewAuthWithAuthInitiator(authInitiator AuthInitiator, config Config) *Auth 
 // been set to true it returns the ID token. If the token it is going to return
 // has expired then it attempts to refresh the token before returning it.
 func (t *Auth) GetAuthToken() (string, error) {
-	token := t.getAuthToken()
+	token := t.getAuthTokenNoCheck()
 	if !tokenIsExpired(token, t.getExpiryMargin()) {
 		return token, nil
 	}
@@ -96,10 +96,10 @@ func (t *Auth) GetAuthToken() (string, error) {
 	if err := t.refreshTokens(); err != nil {
 		return "", errors.Wrap(err, "refresh failed")
 	}
-	return t.getAuthToken(), nil
+	return t.getAuthTokenNoCheck(), nil
 }
 
-func (t *Auth) getAuthToken() string {
+func (t *Auth) getAuthTokenNoCheck() string {
 	if t.shouldUseIDToken() {
 		return t.getIDToken()
 	}
