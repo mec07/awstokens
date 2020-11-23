@@ -1,0 +1,25 @@
+name: golangci-lint
+on:
+  push:
+    branches:
+      - master
+  pull_request:
+jobs:
+  test:
+    name: test and lint
+    runs-on: ubuntu-latest
+    steps:
+      - name: Install Go
+        uses: actions/setup-go@v2
+        with:
+          go-version: 1.14.x
+      - name: Checkout code
+        uses: actions/checkout@v2
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v2.3.0
+        with:
+          version: v1.31
+      - name: Coverage
+        run: go test -v -race -covermode=atomic -coverprofile=cover.out -timeout 10s ./...
+      - name: Report coverage
+        run: bash <(curl -s https://codecov.io/bash) -t e6efcaef-4108-4dce-9db5-ccf03b46360c
